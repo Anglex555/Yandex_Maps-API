@@ -1,8 +1,8 @@
-import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QComboBox
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QComboBox, QLineEdit, QPushButton, QMessageBox
 from PyQt5.QtGui import QPixmap, QPainter, QCursor
 from PyQt5.QtCore import Qt, QPointF
 import requests
+import sys
 
 
 class MapApplication(QWidget):
@@ -48,6 +48,25 @@ class MapApplication(QWidget):
         """)
 
         self.map_type_combo.activated[str].connect(self.onMapTypeChange)
+
+        self.search_edit = QLineEdit(self)
+        self.search_edit.setGeometry(10, 480, 400, 30)
+
+        self.search_button = QPushButton('Найти', self)
+        self.search_button.setGeometry(420, 480, 80, 30)
+        self.search_button.setStyleSheet('''
+            QPushButton {
+                background-color: #ff0000;
+                color: white;
+                border-radius: 5px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #ff6666;
+            }
+        ''')
+        self.search_button.clicked.connect(self.searchObject)
+
         self.update_map()
 
     def update_map(self):
@@ -98,7 +117,6 @@ class MapApplication(QWidget):
         delta = event.angleDelta().y() / 120
         if delta > 0:
             self.zoom += 1
-            print(self.zoom)
             if self.zoom > 20:
                 self.zoom = 20
         else:
@@ -125,6 +143,29 @@ class MapApplication(QWidget):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.is_mouse_pressed = False
+
+    def searchObject(self):
+        query = self.search_edit.text()
+        if query:
+            url = "https://geocode-maps.yandex.ru/1.x/"
+            params = {
+                "apikey": self.apikey,
+                "format": "json",
+                "geocode": query
+            }
+            response = requests.get(url, params=params)
+            data = response.json()
+
+            if data['response']['GeoObjectCollection']['metaDataProperty']['GeocoderResponseMetaData']['found'] == '0':
+                QMessageBox.warning(self, 'Поиск объекта', 'Объект не найден.')
+                return
+
+            coordinates_str = data['response']['GeoObjectCollection']['featureMember'][0]['GeoObject']['Point'][
+                'pos']
+            coordinates = [float(coord) for coord in coordinates_str.split()]
+
+            self.center['lon'], self.center['lat'] = coordinates
+            self.update_map()
 
 
 if __name__ == '__main__':
