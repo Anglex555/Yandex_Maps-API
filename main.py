@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QComboBox, QLineEdit, QPushButton, QMessageBox
-from PyQt5.QtGui import QPixmap, QPainter, QCursor
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QComboBox, QLineEdit, QPushButton, QMessageBox, QListWidget, QListWidgetItem
+from PyQt5.QtGui import QPixmap, QPainter, QCursor, QImage  
 from PyQt5.QtCore import Qt, QPointF
 import requests
 import sys
@@ -9,11 +9,12 @@ class MapApplication(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.apikey = "Место_для_api"
+        self.apikey = "40d1649f-0493-4b70-98ba-98533de7710b"
         self.center = {'lon': 37.617635, 'lat': 55.755814}
         self.zoom = 10
         self.map_type = 'map'
         self.is_mouse_pressed = False
+        self.map_markers = []
 
         self.initUI()
 
@@ -46,6 +47,39 @@ class MapApplication(QWidget):
                 border-left-style: solid;
             }
         """)
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #ffffff;
+            }
+            QLineEdit {
+                border: 2px solid #4A90E2;
+                border-radius: 5px;
+                padding: 3px;
+            }
+            QPushButton {
+                background-color: #4A90E2;
+                color: white;
+                border-radius: 5px;
+                border: none;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: #357AE8;
+            }
+            QListWidget {
+                border: 2px solid #4A90E2;
+                border-radius: 5px;
+            }
+            QListWidget::item {
+                background-color: #ffffff;
+                padding: 5px;
+            }
+            QListWidget::item:selected {
+                background-color: #4A90E2;
+                color: white;
+            }
+        """)
+
 
         self.map_type_combo.activated[str].connect(self.onMapTypeChange)
 
@@ -66,29 +100,135 @@ class MapApplication(QWidget):
             }
         ''')
         self.search_button.clicked.connect(self.searchObject)
+        self.markers_list = QListWidget(self)
+        self.markers_list.setGeometry(740, 100, 190, 300)
+        self.markers_list.itemClicked.connect(self.onMarkerSelected)
+
+        self.add_marker_button = QPushButton('Добавить метку', self)
+        self.add_marker_button.setGeometry(740, 420, 190, 30)
+        self.add_marker_button.clicked.connect(self.addMarker)
+
+        self.remove_marker_button = QPushButton('Удалить метку', self)
+        self.remove_marker_button.setGeometry(740, 460, 190, 30)
+        self.remove_marker_button.clicked.connect(self.removeMarker)
+
+        self.reset_search_button = QPushButton('Сброс поискового результата', self)
+        self.reset_search_button.setGeometry(740, 10, 200, 30)
+        self.reset_search_button.clicked.connect(self.resetSearchResult)
+        
+        self.address_label = QLabel('', self)
+        self.address_label.setGeometry(740, 490, 190, 30)
 
         self.update_map()
+
+    def resetSearchResult(self):
+        self.address_label.setText('')
+        self.removeAllMarkers()
+        self.resetMapCenter()
+        self.markers_list.clear()
+
+
+    def removeAllMarkers(self):
+        self.map_markers.clear()
+        self.update_map()
+
+    def resetMapCenter(self):
+        self.center = {'lon': 37.617635, 'lat': 55.755814}
+        self.update_map()
+        
+    def addMarker(self):
+        lon, lat = self.center['lon'], self.center['lat']
+        marker = {'lon': lon, 'lat': lat, 'address': 'Unknown Address'}
+        self.map_markers.append(marker)
+
+        address = self.getAddress(lon, lat)
+        marker['address'] = address
+
+        self.updateMapMarkersList()
+        self.update_map()
+
+    def getAddress(self, lon, lat):
+        url = "https://geocode-maps.yandex.ru/1.x/"
+        params = {
+            "apikey": self.apikey,
+            "format": "json",
+            "geocode": f"{lon},{lat}"
+        }
+        response = requests.get(url, params=params)
+        data = response.json()
+
+        try:
+            real_address = data['response']['GeoObjectCollection']['featureMember'][0]['GeoObject']['metaDataProperty'][
+                'GeocoderMetaData']['text']
+            return real_address
+        except (KeyError, IndexError):
+            return 'Unknown Address'
+
+    def removeMarker(self):
+        selected_item = self.markers_list.currentItem()
+        if selected_item:
+            index = self.markers_list.row(selected_item)
+            del self.map_markers[index]
+            self.updateMapMarkersList()
+            self.update_map()
+
+    def updateMapMarkersList(self):
+        self.markers_list.clear()
+        for marker in self.map_markers:
+            address = marker['address']
+            item = QListWidgetItem(f'{address}')
+            self.markers_list.addItem(item)
+
+    def onMarkerSelected(self):
+        if self.map_markers:
+            selected_item = self.markers_list.currentItem()
+            if selected_item:
+                index = self.markers_list.row(selected_item)
+                if 0 <= index < len(self.map_markers):
+                    marker = self.map_markers[index]
+                    self.center['lon'], self.center['lat'] = marker['lon'], marker['lat']
+                    self.update_map()
 
     def update_map(self):
         lon = self.center['lon']
         lat = self.center['lat']
 
+        markers_list = []
+        for marker in self.map_markers:
+            markers_list.append(f"{marker['lon']},{marker['lat']},comma")
+
         map_params = {
             "ll": f"{lon},{lat}",
             "z": self.zoom,
             "l": self.map_type,
-            "pt": f"{lon},{lat},pm2blm",
+            "pt": "~".join(markers_list)
         }
 
-        map_api_server = "https://static-maps.yandex.ru/1.x/"
+        map_api_server = "http://static-maps.yandex.ru/1.x/"
         response = requests.get(map_api_server, params=map_params)
 
         with open("map.png", "wb") as f:
             f.write(response.content)
 
-        pixmap = QPixmap('map.png')
-        pixmap = pixmap.scaled(780, 520, Qt.KeepAspectRatio)
+        self.pixmap = QPixmap('map.png')
+        pixmap = self.pixmap.scaled(780, 520, Qt.KeepAspectRatio)
         self.map_label.setPixmap(pixmap)
+
+    def convert_geo_to_pixel(self, lon, lat):
+        center_x = 780 / 2
+        center_y = 520 / 2
+        
+        lon_diff = lon - self.center['lon']
+        lat_diff = self.center['lat'] - lat
+        
+        lon_scale = 360 / (2 ** (self.zoom + 8))
+        lat_scale = 170 / (2 ** (self.zoom + 8))
+        
+        pixel_x = center_x + lon_diff / lon_scale
+        pixel_y = center_y + lat_diff / lat_scale
+        
+        return pixel_x, pixel_y
+
 
     def onMapTypeChange(self, text):
         if text == "Схема":
@@ -101,6 +241,7 @@ class MapApplication(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Up:
+            print(self.map_markers)
             self.center['lat'] += 0.01
             self.update_map()
         elif event.key() == Qt.Key_Down:
@@ -160,9 +301,18 @@ class MapApplication(QWidget):
                 QMessageBox.warning(self, 'Поиск объекта', 'Объект не найден.')
                 return
 
+            address = data['response']['GeoObjectCollection']['featureMember'][0]['GeoObject']['metaDataProperty'][
+                'GeocoderMetaData']['text']
+            self.address_label.setText(f'Адрес: {address}')
+
             coordinates_str = data['response']['GeoObjectCollection']['featureMember'][0]['GeoObject']['Point'][
                 'pos']
             coordinates = [float(coord) for coord in coordinates_str.split()]
+
+            marker = {'lon': coordinates[0], 'lat': coordinates[1], 'address': address}
+            self.map_markers.append(marker)
+            self.updateMapMarkersList()
+            self.update_map()
 
             self.center['lon'], self.center['lat'] = coordinates
             self.update_map()
